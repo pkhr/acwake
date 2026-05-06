@@ -1,0 +1,111 @@
+#!/bin/bash
+# acwake — keep macOS awake on AC; sleep normally on battery.
+# Event-driven via `pmset -g pslog` (IOKit power-source notifications). No polling.
+# Apple Silicon-safe: caffeinate -s overrides clamshell sleep when the lid is closed.
+# https://github.com/pkhr/acwake
+
+set -euo pipefail
+
+LABEL="acwake"
+BIN="/usr/local/bin/${LABEL}"
+PLIST="/Library/LaunchDaemons/${LABEL}.plist"
+LOG="/Library/Logs/${LABEL}.log"
+
+SELF="$(cd -- "$(dirname -- "$0")" 2>/dev/null && pwd -P)/$(basename -- "$0")"
+
+log()   { echo "$(date '+%F %T')  $*"; }
+on_ac() { pmset -g ps | grep -q "'AC Power'"; }
+
+run() {
+  local caf=""
+
+  start() {
+    if [[ -z $caf ]] || ! kill -0 "$caf" 2>/dev/null; then
+      caffeinate -dimsu & caf=$!
+      log "AC      caffeinate pid=$caf"
+    fi
+  }
+
+  stop() {
+    if [[ -n $caf ]] && kill -0 "$caf" 2>/dev/null; then
+      kill "$caf" 2>/dev/null || true
+      log "battery caffeinate pid=$caf stopped"
+      caf=""
+    fi
+  }
+
+  trap stop EXIT
+  if on_ac; then log "started on AC";      start
+  else           log "started on battery"
+  fi
+
+  while IFS= read -r line; do
+    case "$line" in
+      *"'AC Power'"*|*"'UPS Power'"*) start ;;
+      *"'Battery Power'"*)            stop  ;;
+    esac
+  done < <(exec pmset -g pslog 2>&1)
+}
+
+install_cmd() {
+  install -m 0755 "$SELF" "$BIN"
+  cat >"$PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>${LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${BIN}</string>
+        <string>run</string>
+    </array>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><true/>
+    <key>StandardOutPath</key><string>${LOG}</string>
+    <key>StandardErrorPath</key><string>${LOG}</string>
+</dict>
+</plist>
+EOF
+  chmod 644 "$PLIST"
+  launchctl bootout system "$PLIST" 2>/dev/null || true
+  launchctl bootstrap system "$PLIST"
+  echo "installed: $LABEL  (log: $LOG)"
+}
+
+uninstall_cmd() {
+  launchctl bootout system "$PLIST" 2>/dev/null || true
+  rm -f "$PLIST" "$BIN" "$LOG"
+  echo "uninstalled: $LABEL"
+}
+
+status_cmd() {
+  if [[ -f $PLIST ]]; then
+    echo "installed: $PLIST"
+    launchctl print "system/$LABEL" 2>/dev/null | head -10 | sed 's/^/  /' || true
+  else
+    echo "not installed"
+  fi
+  on_ac && echo "power: AC" || echo "power: battery"
+}
+
+case "${1:-}" in
+  install)
+    [[ $EUID -ne 0 ]] && exec sudo "$SELF" "$@"
+    install_cmd ;;
+  uninstall)
+    [[ $EUID -ne 0 ]] && exec sudo "$SELF" "$@"
+    uninstall_cmd ;;
+  run)    run ;;
+  status) status_cmd ;;
+  *)
+    cat <<USAGE
+acwake — stay awake on AC, sleep on battery (macOS)
+
+  $(basename "$0") install     install as launchd daemon (re-execs under sudo)
+  $(basename "$0") uninstall   remove daemon, plist, binary, log
+  $(basename "$0") status      show install/runtime state
+  $(basename "$0") run         foreground mode (used by launchd)
+USAGE
+    exit 2 ;;
+esac
