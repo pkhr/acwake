@@ -39,24 +39,22 @@ When on AC, a single `caffeinate -dimsu` child process holds assertions that pre
 ## Install
 
 ```sh
-git clone https://github.com/pkhr/acwake.git
-sudo ./acwake/acwake install
+brew tap pkhr/tap
+brew install acwake
+sudo brew services start acwake
 ```
 
-## Usage
+The daemon needs root because it must run as a system-wide `LaunchDaemon` to override clamshell sleep. `brew services` will create `/Library/LaunchDaemons/homebrew.mxcl.acwake.plist` and start it.
 
-```
-acwake install     install and start the launchd daemon
-acwake uninstall   stop daemon, remove plist, binary, log
-acwake status      show install/runtime state and current power source
-acwake run         foreground mode (used internally by launchd)
-```
-
-Watch it react in real time:
+Verify:
 
 ```sh
-sudo tail -f /Library/Logs/acwake.log
+brew services list                       # acwake should be 'started'
+acwake status                            # shows current power source
+sudo tail -f /Library/Logs/acwake.log    # plug/unplug to see reactions
 ```
+
+Sample log output:
 
 ```
 2026-05-06 16:55:14  AC      caffeinate pid=42139
@@ -66,15 +64,19 @@ sudo tail -f /Library/Logs/acwake.log
 ## Uninstall
 
 ```sh
-sudo /usr/local/bin/acwake uninstall
+sudo brew services stop acwake
+brew uninstall acwake
+brew untap pkhr/tap
 ```
+
+Removes the daemon, the launchd plist, the binary, and the tap. The Mac returns to default `pmset` behavior. The log file at `/Library/Logs/acwake.log` is left in place; remove it manually if you want to.
 
 ## What gets installed
 
 | Path | Purpose |
 | --- | --- |
-| `/usr/local/bin/acwake` | the script itself |
-| `/Library/LaunchDaemons/acwake.plist` | launchd unit (`RunAtLoad` + `KeepAlive`) |
+| `$(brew --prefix)/bin/acwake` | the script (managed by brew) |
+| `/Library/LaunchDaemons/homebrew.mxcl.acwake.plist` | launchd unit (managed by `brew services`) |
 | `/Library/Logs/acwake.log` | stdout / stderr |
 
 ## Why not `pmset -c disablesleep 1`?
