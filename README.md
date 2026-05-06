@@ -1,15 +1,19 @@
-# acwake
-
 ```
-   ╔══════════════════════════════════════════════════════╗
-   ║                       acwake                         ║
-   ║       stay awake on AC, sleep on battery (macOS)     ║
-   ╚══════════════════════════════════════════════════════╝
+ █████╗  ██████╗██╗    ██╗ █████╗ ██╗  ██╗███████╗
+██╔══██╗██╔════╝██║    ██║██╔══██╗██║ ██╔╝██╔════╝
+███████║██║     ██║ █╗ ██║███████║█████╔╝ █████╗  
+██╔══██║██║     ██║███╗██║██╔══██║██╔═██╗ ██╔══╝  
+██║  ██║╚██████╗╚███╔███╔╝██║  ██║██║  ██╗███████╗
+╚═╝  ╚═╝ ╚═════╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝
 ```
 
-Tiny launchd daemon that runs `caffeinate -dimsu` while you're on AC, and stops it the moment you unplug. Apple-Silicon-safe — overrides clamshell sleep, so a closed-lid laptop on a charger stays reachable over SSH / VNC / Tailscale.
+> **stay awake on AC, sleep on battery — macOS**
+
+Tiny launchd daemon that runs `caffeinate -dimsu` while you're on AC, and stops it the moment you unplug. Apple-Silicon-safe — overrides clamshell sleep, so a closed-lid laptop on a charger stays reachable over SSH, VNC, and Tailscale.
 
 Event-driven via `pmset -g pslog` (IOKit power-source notifications). No polling, no idle CPU, no battery drain between transitions.
+
+---
 
 ## How it works
 
@@ -65,19 +69,17 @@ sudo tail -f /Library/Logs/acwake.log
 sudo /usr/local/bin/acwake uninstall
 ```
 
-Removes the binary, the launchd plist, and the log file. Your Mac returns to default `pmset` behavior.
-
 ## What gets installed
 
 | Path | Purpose |
 | --- | --- |
-| `/usr/local/bin/acwake` | the script (copy of this file) |
+| `/usr/local/bin/acwake` | the script itself |
 | `/Library/LaunchDaemons/acwake.plist` | launchd unit (`RunAtLoad` + `KeepAlive`) |
-| `/Library/Logs/acwake.log` | stdout/stderr |
+| `/Library/Logs/acwake.log` | stdout / stderr |
 
 ## Why not `pmset -c disablesleep 1`?
 
-`disablesleep` is system-wide on macOS — there is no real per-power-source scoping despite pmset accepting `-c`/`-b` flags for it. Setting it globally drains the battery when you're unplugged with the lid open. acwake gives you clean per-power-source behavior with a four-line state machine.
+`disablesleep` is system-wide on macOS — there's no real per-power-source scoping despite pmset accepting `-c`/`-b` flags. Setting it globally drains the battery when you unplug with the lid open. acwake gives clean per-power-source behavior with a four-line state machine.
 
 ## License
 
