@@ -9,32 +9,23 @@
 
 > **stay awake on AC, sleep on battery — macOS**
 
-Tiny launchd daemon that runs `caffeinate -dimsu` while you're on AC, and stops it the moment you unplug. Apple-Silicon-safe — overrides clamshell sleep, so a closed-lid laptop on a charger stays reachable over SSH, VNC, and Tailscale.
-
-Event-driven via `pmset -g pslog` (IOKit power-source notifications). No polling, no idle CPU, no battery drain between transitions.
+A microscopic launchd wrapper around `caffeinate -s`. While you're on AC, system sleep is held off. When you unplug, the assertion goes inert and macOS sleeps normally. **Display sleep, screen saver, dim, and lock all keep working as configured** — only system sleep is prevented.
 
 ---
 
 ## How it works
 
 ```
-              pmset -g pslog
-            (IOKit power events)
-                     │
-                     ▼
-          ┌──────────────────┐
-          │      acwake      │
-          │ (launchd daemon) │
-          └───┬──────────┬───┘
-              │          │
-           on AC      on battery
-              │          │
-              ▼          ▼
-   caffeinate -dimsu   kill caffeinate
-   (no sleep, ever)    (sleep normally)
+       caffeinate -s
+       (kIOPMAssertPreventSystemSleep, AC-scoped by the kernel)
+
+       on AC      ──►  enforced (no system sleep)
+       on battery ──►  inactive (sleep normally)
+
+       display, screen saver, dim, lock:  untouched
 ```
 
-When on AC, a single `caffeinate -dimsu` child process holds assertions that prevent every sleep type — including the clamshell-close case. When you unplug, the child dies and macOS's default battery-sleep behavior resumes.
+The kernel itself only enforces a `PreventSystemSleep` assertion while the Mac is on AC power. No event loop, no polling, no AC/battery detection in our own code — `caffeinate(1)` and the IOKit power-management subsystem do all of it.
 
 ## Install
 
@@ -44,21 +35,20 @@ brew install acwake
 sudo brew services start acwake
 ```
 
-The daemon needs root because it must run as a system-wide `LaunchDaemon` to override clamshell sleep. `brew services` will create `/Library/LaunchDaemons/homebrew.mxcl.acwake.plist` and start it.
+The daemon runs as a system-wide `LaunchDaemon` (root). `brew services` writes `/Library/LaunchDaemons/homebrew.mxcl.acwake.plist` and starts it.
 
 Verify:
 
 ```sh
 brew services list                       # acwake should be 'started'
-acwake status                            # shows current power source
-sudo tail -f /Library/Logs/acwake.log    # plug/unplug to see reactions
+acwake status                            # power source + assertion state
 ```
 
-Sample log output:
+Sample `acwake status` output:
 
 ```
-2026-05-06 16:55:14  AC      caffeinate pid=42139
-2026-05-06 17:30:02  battery caffeinate pid=42139 stopped
+Now drawing from 'AC Power'
+PreventSystemSleep: active
 ```
 
 ## Uninstall
@@ -69,7 +59,7 @@ brew uninstall acwake
 brew untap pkhr/tap
 ```
 
-Removes the daemon, the launchd plist, the binary, and the tap. The Mac returns to default `pmset` behavior. The log file at `/Library/Logs/acwake.log` is left in place; remove it manually if you want to.
+Removes the daemon, the launchd plist, and the binary. Mac returns to default `pmset` behavior.
 
 ## What gets installed
 
@@ -77,11 +67,15 @@ Removes the daemon, the launchd plist, the binary, and the tap. The Mac returns 
 | --- | --- |
 | `$(brew --prefix)/bin/acwake` | the script (managed by brew) |
 | `/Library/LaunchDaemons/homebrew.mxcl.acwake.plist` | launchd unit (managed by `brew services`) |
-| `/Library/Logs/acwake.log` | stdout / stderr |
+
+## Limitations
+
+- **Closed lid on Apple Silicon (Ventura+):** macOS may force sleep when the lid magnet detects closure regardless of any software assertion (including `caffeinate -s` and `pmset disablesleep 1`). If your goal is reachability of a closed-lid laptop, the only Apple-supported path is **clamshell mode with an external display, keyboard, and mouse attached**. Tools like [Amphetamine](https://apps.apple.com/us/app/amphetamine/id937984704) claim to bypass this via a non-public IOKit path; this script does not attempt to.
+- **No GUI.** Control surface is `brew services` plus `acwake status`.
 
 ## Why not `pmset -c disablesleep 1`?
 
-`disablesleep` is system-wide on macOS — there's no real per-power-source scoping despite pmset accepting `-c`/`-b` flags. Setting it globally drains the battery when you unplug with the lid open. acwake gives clean per-power-source behavior with a four-line state machine.
+`disablesleep` is system-wide on macOS — there's no real per-power-source scoping despite pmset accepting `-c`/`-b` flags. Setting it globally drains the battery when you unplug with the lid open. `caffeinate -s` is the IOKit-supported way to express "no system sleep, AC only" without that side effect.
 
 ## License
 

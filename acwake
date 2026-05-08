@@ -1,60 +1,31 @@
 #!/bin/bash
 # acwake — keep macOS awake on AC; sleep normally on battery.
-# Event-driven via `pmset -g pslog` (IOKit power-source notifications). No polling.
-# Apple Silicon-safe: caffeinate -s overrides clamshell sleep when the lid is closed.
+# Wraps `caffeinate -s` (kIOPMAssertPreventSystemSleep, AC-scoped by the kernel).
+# Display sleep, screen saver, dim, and lock all behave as configured.
 # https://github.com/pkhr/acwake
 
 set -euo pipefail
 
-log()   { echo "$(date '+%F %T')  $*"; }
-on_ac() { pmset -g ps | grep -q "'AC Power'"; }
-
-run() {
-  local caf=""
-
-  start() {
-    if [[ -z $caf ]] || ! kill -0 "$caf" 2>/dev/null; then
-      caffeinate -dimsu & caf=$!
-      log "AC      caffeinate pid=$caf"
-    fi
-  }
-
-  stop() {
-    if [[ -n $caf ]] && kill -0 "$caf" 2>/dev/null; then
-      kill "$caf" 2>/dev/null || true
-      log "battery caffeinate pid=$caf stopped"
-      caf=""
-    fi
-  }
-
-  trap stop EXIT
-  if on_ac; then log "started on AC";      start
-  else           log "started on battery"
-  fi
-
-  while IFS= read -r line; do
-    case "$line" in
-      *"'AC Power'"*|*"'UPS Power'"*) start ;;
-      *"'Battery Power'"*)            stop  ;;
-    esac
-  done < <(exec pmset -g pslog 2>&1)
-}
-
-status_cmd() {
-  on_ac && echo "power: AC" || echo "power: battery"
-}
-
 case "${1:-}" in
-  run)    run ;;
-  status) status_cmd ;;
+  run)
+    exec caffeinate -s
+    ;;
+  status)
+    pmset -g ps | head -1
+    if pmset -g assertions | grep -qi PreventSystemSleep; then
+      echo "PreventSystemSleep: active"
+    else
+      echo "PreventSystemSleep: not held"
+    fi
+    ;;
   *)
     cat <<USAGE
 acwake — stay awake on AC, sleep on battery (macOS)
 
-  $(basename "$0") run       foreground daemon (used by brew services)
-  $(basename "$0") status    show current power source
+  $(basename "$0") run     daemon mode (used by brew services)
+  $(basename "$0") status  show power source and assertion state
 
-Install via Homebrew:
+Install:
   brew tap pkhr/tap
   brew install acwake
   sudo brew services start acwake
